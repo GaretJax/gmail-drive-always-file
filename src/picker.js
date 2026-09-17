@@ -259,29 +259,36 @@
   // attachment button is not re-processed.
   let synthesizing = false;
 
-  // Heuristic: does this node look like a selectable file entry in the picker?
-  function isFileItem(node) {
+  // The nearest picker item (file/doc/folder row) at or above `node`, or null.
+  function closestItem(node) {
     let el = node;
     for (let depth = 0; el && depth < 8; el = el.parentElement, depth++) {
       if (!el.getAttribute) continue;
+      if (el.getAttribute("data-target")) return el; // picker item marker
       const role = el.getAttribute("role");
       if (role === "option" || role === "row" || role === "gridcell" || role === "listitem") {
-        return true;
+        return el;
       }
     }
-    return false;
+    return null;
   }
 
-  // Handle a "confirm this file" gesture (double-click or Enter) on a file
-  // item. We only take over when the attachment button is currently ENABLED,
-  // which is a reliable signal that an attachable file is selected: folders and
-  // native Google files leave it disabled, so double-clicking a folder to open
-  // it, or any other native behaviour, is never blocked.
-  //
-  // Note: when a native Google file is confirmed, Gmail still inserts a Drive
-  // link (attachment being impossible). Suppressing that specific case safely
-  // requires telling a native-file row apart from a folder row; that is a
-  // follow-up once the file/folder markup is confirmed.
+  // Is this row a document/file (as opposed to a folder or other navigation
+  // target)? Files AND native Google docs are marked data-target="doc" /
+  // data-is-doc-name="true"; folders are not, so this is what keeps us from
+  // ever hijacking a folder's double-click (which navigates into it).
+  function isDocRow(el) {
+    if (!el || !el.getAttribute) return false;
+    const target = el.getAttribute("data-target");
+    if (target !== null) return target === "doc";
+    return el.getAttribute("data-is-doc-name") === "true";
+  }
+
+  // Handle a "confirm this item" gesture (double-click or Enter):
+  //   - a real file  -> insert as attachment (attachment button enabled);
+  //   - a native doc -> suppress, so a Drive link is never inserted by
+  //                     accident (attachment disabled, link enabled);
+  //   - a folder / anything else -> leave to Gmail, so navigation etc. work.
   function handleDefaultAction(event) {
     if (synthesizing) return;
     if (!GDAF.current.overrideDefaultAction) return;
@@ -293,29 +300,36 @@
     // themselves): let clicking / Entering a focused button do its own thing.
     if (target.closest && target.closest('button, [role="button"]')) return;
 
-    // Only act on a gesture over an actual file item.
-    if (!isFileItem(target)) return;
+    // Only act on a document/file row. Folders (and everything else) are left
+    // untouched so their built-in behaviour (navigation) is never blocked.
+    const item = closestItem(target);
+    if (!isDocRow(item)) return;
 
-    // Only engage inside a recognised picker footer with an enabled attachment
-    // option. Anything else (folder, native file, nothing selected) is left to
-    // Gmail so we never break navigation or insert unexpectedly.
+    // Only engage inside a recognised picker footer.
     const footer = findFooter(document);
     if (!footer || !footer.linkBtn) return;
     const attachBtn = footer.attachBtn;
-    if (!attachBtn || isDisabled(attachBtn)) return;
 
-    // Insert the just-selected file as an attachment instead of a link.
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    synthesizing = true;
-    try {
-      attachBtn.click();
-    } finally {
-      // Release on the next tick so any follow-on events from .click() that
-      // Google might dispatch are still recognised as ours.
-      setTimeout(() => {
-        synthesizing = false;
-      }, 0);
+    if (attachBtn && !isDisabled(attachBtn)) {
+      // Attachable file: insert as attachment instead of a link.
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      synthesizing = true;
+      try {
+        attachBtn.click();
+      } finally {
+        // Release on the next tick so any follow-on events from .click() that
+        // Google might dispatch are still recognised as ours.
+        setTimeout(() => {
+          synthesizing = false;
+        }, 0);
+      }
+    } else if (!isDisabled(footer.linkBtn)) {
+      // Native Google doc (attachment impossible, link possible): suppress the
+      // gesture so a Drive link is not inserted by accident. Insert a link only
+      // by clicking "Insert as Drive link" on purpose.
+      event.preventDefault();
+      event.stopImmediatePropagation();
     }
   }
 

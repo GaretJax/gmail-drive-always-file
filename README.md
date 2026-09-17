@@ -18,9 +18,10 @@ If a selected file can only be linked (e.g. a native Google Doc/Sheet, which
 Gmail can't attach as a file), the extension keeps both buttons but leaves the
 **attachment button disabled in the primary slot**, so the link button is
 demoted to the secondary style and is far less likely to be clicked by
-accident. The double‑click / Enter override only fires when the attachment
-option is actually available, so it never blocks folder navigation or other
-built‑in behaviour.
+accident. In that case double‑click / Enter on the file does **nothing**
+(rather than silently inserting a link) — you insert a link only by clicking
+"Insert as Drive link" on purpose. Folders are never affected: double‑clicking
+a folder still navigates into it.
 
 ## Install (unpacked)
 
@@ -113,11 +114,10 @@ icons/                 Extension icons (generated, see scripts/)
 - The confirm‑gesture override triggers the *attachment* button for the file
   you double‑clicked / pressed Enter on. If you have a mix selected, use the
   buttons directly.
-- Double‑clicking / pressing Enter on a **native Google file** still follows
-  Gmail's default (a Drive link), because that gesture is intentionally left
-  alone unless attaching is possible (this keeps folder navigation working).
-  The buttons are still swapped, so the disabled attachment button occupies the
-  primary slot and the link button is de‑emphasised.
+- File vs folder is told apart by the picker's `data-target="doc"` marker on
+  each row. If Google renames that marker, the override will simply stop firing
+  (falling back to Gmail's own behaviour) rather than misbehaving — folder
+  navigation always wins.
 
 ## Development
 
