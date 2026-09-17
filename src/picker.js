@@ -42,7 +42,7 @@
     if (!DEBUG) return;
     try {
       const args = Array.prototype.slice.call(arguments);
-      console.debug.apply(console, ["[gdaf]"].concat(args));
+      console.log.apply(console, ["[gdaf]"].concat(args));
     } catch (e) {
       /* ignore */
     }
