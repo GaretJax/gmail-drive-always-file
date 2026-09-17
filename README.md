@@ -72,12 +72,17 @@ Google's CSS class names are obfuscated and change often, so the extension
   the primary styling and the link button the secondary styling — while
   preserving each button's own enabled/disabled state, so a disabled
   attachment button still looks disabled.
-- Places the attachment button on the **right** using CSS flexbox `order`
-  (an inline style), rather than moving DOM nodes, so it doesn't fight
-  Google's incremental‑DOM reconciliation.
+- Places the attachment button on the **right**. The two buttons sit in
+  separate wrapper elements, so it finds the pair of sibling wrappers under
+  their common parent and reorders those — via CSS flexbox `order` when that
+  parent is a flex row (no DOM move, so it doesn't fight Google's
+  incremental‑DOM), otherwise by moving the wrapper node.
 - Uses a `MutationObserver` to re‑apply the styling whenever the picker
-  re‑renders, and capture‑phase `dblclick` / `keydown` listeners to intercept
-  the confirm gesture before Gmail's own handler runs.
+  re‑renders. For the confirm gesture it reconstructs a **double‑click from
+  two `click`s on the same file** (identified by its stable `data-id`) —
+  because the picker re‑renders a tile when it's selected, a native `dblclick`
+  often never fires. `dblclick` is kept as a fallback/suppressor, and Enter
+  confirms too. All listeners are capture‑phase so they run before Gmail's own.
 
 Because everything keys off the button *text*, adapting to another language
 is just a matter of changing two patterns in the options — no code changes.

@@ -232,12 +232,46 @@
       reprefixTree(linkBtn, primaryPrefix, secondaryPrefix);
     }
 
-    // Place the attachment button on the right via flexbox order (the footer is
-    // a flex row). Using `order` instead of moving DOM nodes avoids fighting
-    // Google's incremental-DOM reconciliation, and is a no-op if the container
-    // isn't flex. Higher order value = further to the right.
-    if (attachBtn.style.order !== "2") attachBtn.style.order = "2";
-    if (linkBtn.style.order !== "1") linkBtn.style.order = "1";
+    // Place the attachment button on the right. The two buttons live in
+    // separate wrapper elements, so we find the pair of sibling ancestors that
+    // share a common parent and reorder those.
+    positionAttachmentRight(attachBtn, linkBtn);
+  }
+
+  // Find the two ancestor nodes (one leading to `a`, one to `b`) that are
+  // siblings under a shared parent. Returns { parent, aNode, bNode } or null.
+  function siblingPair(a, b) {
+    const aPath = new Map(); // ancestor -> the child on the path down to `a`
+    let child = a;
+    for (let n = a.parentNode; n; child = n, n = n.parentNode) aPath.set(n, child);
+    let bChild = b;
+    for (let n = b.parentNode; n; bChild = n, n = n.parentNode) {
+      if (aPath.has(n)) return { parent: n, aNode: aPath.get(n), bNode: bChild };
+    }
+    return null;
+  }
+
+  function positionAttachmentRight(attachBtn, linkBtn) {
+    const pair = siblingPair(attachBtn, linkBtn);
+    if (!pair) return;
+    const { parent, aNode, bNode } = pair;
+    if (aNode === bNode) return;
+
+    const display = parent.ownerDocument.defaultView
+      .getComputedStyle(parent)
+      .display;
+    const isFlex = display === "flex" || display === "inline-flex";
+
+    if (isFlex) {
+      // Reorder visually without moving DOM nodes (idom-friendly).
+      if (aNode.style.order !== "2") aNode.style.order = "2";
+      if (bNode.style.order !== "1") bNode.style.order = "1";
+    } else if (
+      bNode.compareDocumentPosition(aNode) & Node.DOCUMENT_POSITION_PRECEDING
+    ) {
+      // Not a flex row: physically move attachment's wrapper after link's.
+      parent.insertBefore(aNode, bNode.nextSibling);
+    }
   }
 
   function runSwap(root) {
@@ -257,12 +291,13 @@
   // attachment button is not re-processed.
   let synthesizing = false;
 
-  // The nearest picker item (file/doc/folder row) at or above `node`, or null.
-  function closestItem(node) {
+  // The nearest picker row (file/doc/folder) at or above `node`, or null.
+  // Located by ARIA role so it works whether the gesture landed on the row or
+  // on a thumbnail/label deep inside it.
+  function closestRow(node) {
     let el = node;
-    for (let depth = 0; el && depth < 8; el = el.parentElement, depth++) {
+    for (let depth = 0; el && depth < 12; el = el.parentElement, depth++) {
       if (!el.getAttribute) continue;
-      if (el.getAttribute("data-target")) return el; // picker item marker
       const role = el.getAttribute("role");
       if (role === "option" || role === "row" || role === "gridcell" || role === "listitem") {
         return el;
@@ -282,64 +317,110 @@
     return el.getAttribute("data-is-doc-name") === "true";
   }
 
-  // Handle a "confirm this item" gesture (double-click or Enter):
-  //   - a real file  -> insert as attachment (attachment button enabled);
-  //   - a native doc -> suppress, so a Drive link is never inserted by
-  //                     accident (attachment disabled, link enabled);
-  //   - a folder / anything else -> leave to Gmail, so navigation etc. work.
-  function handleDefaultAction(event) {
-    if (synthesizing) return;
-    if (!GDAF.current.overrideDefaultAction) return;
+  // A stable identity for a row, so we can recognise two clicks on the "same"
+  // file even though the picker replaces the element between clicks.
+  function rowId(el) {
+    return (el && el.getAttribute && el.getAttribute("data-id")) || null;
+  }
 
-    const target = event.target;
-    if (!target) return;
-
-    // Never interfere with a gesture aimed at a button (the footer buttons
-    // themselves): let clicking / Entering a focused button do its own thing.
-    if (target.closest && target.closest('button, [role="button"]')) return;
-
-    // Only act on a document/file row. Folders (and everything else) are left
-    // untouched so their built-in behaviour (navigation) is never blocked.
-    const item = closestItem(target);
-    if (!isDocRow(item)) return;
-
-    // Only engage inside a recognised picker footer.
+  // Act on a confirmed "open this file" gesture. Returns true if we took over.
+  //   - attachable file -> insert as attachment;
+  //   - native Google doc (attach disabled, link enabled) -> suppress, so no
+  //     stray Drive link;
+  //   - otherwise -> leave to Gmail.
+  function confirmDocRow(event) {
     const footer = findFooter(document);
-    if (!footer || !footer.linkBtn) return;
+    if (!footer || !footer.linkBtn) return false;
     const attachBtn = footer.attachBtn;
 
     if (attachBtn && !isDisabled(attachBtn)) {
-      // Attachable file: insert as attachment instead of a link.
       event.preventDefault();
       event.stopImmediatePropagation();
       synthesizing = true;
       try {
         attachBtn.click();
       } finally {
-        // Release on the next tick so any follow-on events from .click() that
-        // Google might dispatch are still recognised as ours.
         setTimeout(() => {
           synthesizing = false;
         }, 0);
       }
-    } else if (!isDisabled(footer.linkBtn)) {
-      // Native Google doc (attachment impossible, link possible): suppress the
-      // gesture so a Drive link is not inserted by accident. Insert a link only
-      // by clicking "Insert as Drive link" on purpose.
+      lastConfirmAt = Date.now();
+      return true;
+    }
+    if (!isDisabled(footer.linkBtn)) {
+      // Native Google doc: suppress so a link is not inserted by accident.
       event.preventDefault();
       event.stopImmediatePropagation();
+      lastConfirmAt = Date.now();
+      return true;
+    }
+    return false;
+  }
+
+  // --- double-click, reconstructed from click events ---
+  //
+  // The picker re-renders a file tile when it becomes selected, so the browser
+  // often never fires a native `dblclick` on a single stable element. We detect
+  // a double-click ourselves: two clicks on the same row (by data-id) within a
+  // short window. The first click is left alone (it selects the file); the
+  // second is taken over.
+  const DOUBLE_MS = 500;
+  let lastClickId = null;
+  let lastClickAt = 0;
+  let lastConfirmAt = 0;
+
+  function eligible(target) {
+    if (synthesizing) return null;
+    if (!GDAF.current.overrideDefaultAction) return null;
+    if (!target) return null;
+    // Never interfere with a gesture aimed at a button (the footer buttons).
+    if (target.closest && target.closest('button, [role="button"]')) return null;
+    const row = closestRow(target);
+    if (!isDocRow(row)) return null;
+    return row;
+  }
+
+  function onClick(event) {
+    const row = eligible(event.target);
+    if (!row) {
+      lastClickId = null;
+      return;
+    }
+    const id = rowId(row) || "(row)";
+    const now = Date.now();
+    const isSecond = id === lastClickId && now - lastClickAt < DOUBLE_MS;
+
+    if (isSecond) {
+      lastClickId = null;
+      lastClickAt = 0;
+      confirmDocRow(event); // preventDefault/stop happen inside on takeover
+    } else {
+      // First click: remember it, let selection happen normally.
+      lastClickId = id;
+      lastClickAt = now;
     }
   }
 
+  // Fallback + suppressor: if a native dblclick does fire, either finish the
+  // job (if the click path somehow missed it) or neutralise Gmail's built-in
+  // dblclick-to-link when we already handled it via clicks.
   function onDblClick(event) {
-    handleDefaultAction(event);
+    if (Date.now() - lastConfirmAt < 700) {
+      // Already handled via the click path; just stop Gmail's own dblclick.
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
+    if (!eligible(event.target)) return;
+    confirmDocRow(event);
   }
 
   function onKeyDown(event) {
     if (event.key !== "Enter") return;
     // Leave modified Enter (Ctrl/Cmd/Alt/Shift+Enter) to the app.
     if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
-    handleDefaultAction(event);
+    if (!eligible(event.target)) return;
+    confirmDocRow(event);
   }
 
   /* ----------------------------- wiring ------------------------------- */
@@ -361,7 +442,10 @@
 
   function start() {
     // Capture-phase listeners so we run before Gmail's own handlers and can
-    // suppress them (double-click and Enter both "confirm" the selected file).
+    // suppress them. We reconstruct double-click from `click` (the picker
+    // re-renders tiles between clicks, so native `dblclick` is unreliable);
+    // `dblclick` stays as a fallback/suppressor, and Enter confirms too.
+    document.addEventListener("click", onClick, true);
     document.addEventListener("dblclick", onDblClick, true);
     document.addEventListener("keydown", onKeyDown, true);
 
