@@ -414,6 +414,14 @@
 
   let lastConfirmAt = 0;
 
+  // Double-click detection from clicks. We must suppress the SECOND click,
+  // because in this picker a click on an already-selected file toggles it OFF
+  // (select on click 1, deselect on click 2), which would leave nothing
+  // selected and no footer. Suppressing click 2 keeps the file selected.
+  const DOUBLE_MS = 500;
+  let lastClickId = null;
+  let lastClickAt = 0;
+
   function eligible(target) {
     if (synthesizing) return null;
     if (!GDAF.current.overrideDefaultAction) return null;
@@ -484,9 +492,34 @@
     return true;
   }
 
+  // Detect a double-click from clicks so we can suppress the SECOND click
+  // (which would otherwise toggle the file's selection off). The first click is
+  // left alone so it selects the file and the footer renders.
+  function onClick(event) {
+    if (synthesizing) return;
+    if (!GDAF.current.overrideDefaultAction) return;
+    const row = eligible(event.target);
+    if (!row) {
+      lastClickId = null;
+      return;
+    }
+    const id = (row.getAttribute && row.getAttribute("data-id")) || "(row)";
+    const now = Date.now();
+    if (id === lastClickId && now - lastClickAt < DOUBLE_MS) {
+      // Second click of a double-click: keep the selection, take over.
+      lastClickId = null;
+      lastClickAt = 0;
+      confirmDocRow(event);
+    } else {
+      lastClickId = id;
+      lastClickAt = now;
+    }
+  }
+
   function onDblClick(event) {
     if (Date.now() - lastConfirmAt < 700) {
-      // Already handled; make sure the native dblclick doesn't also fire.
+      // Already handled via the click pair; make sure the native dblclick
+      // (which inserts a link) doesn't also fire.
       event.preventDefault();
       event.stopImmediatePropagation();
       return;
@@ -522,8 +555,9 @@
 
   function start() {
     // Capture-phase listeners so we run before the picker's own handlers and
-    // can suppress them. Single clicks are left untouched (they select the file
-    // and keep the footer rendered); we only take over the confirm gesture.
+    // can suppress them. The first click selects the file (left untouched); the
+    // second click of a double-click is taken over to attach.
+    document.addEventListener("click", onClick, true);
     document.addEventListener("dblclick", onDblClick, true);
     document.addEventListener("keydown", onKeyDown, true);
 
