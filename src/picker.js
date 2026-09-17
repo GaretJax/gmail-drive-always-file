@@ -293,10 +293,15 @@
     }
   }
 
+  let styledLogged = false;
   function runSwap(root) {
     if (!GDAF.current.swapButtons) return;
     const pair = findPair(root);
     if (!pair) return;
+    if (!styledLogged) {
+      styledLogged = true;
+      dbg("styling footer in frame", location.href);
+    }
     try {
       applySwap(pair.attachBtn, pair.linkBtn);
     } catch (e) {
@@ -338,6 +343,7 @@
       port.onDisconnect.addListener(function () {
         port = null; // reconnect lazily on next send
       });
+      dbg("port connected");
     } catch (e) {
       port = null;
       dbg("connectPort failed", String(e));
@@ -565,9 +571,8 @@
 
     // Open the cross-frame relay port so this frame can both broadcast and
     // receive "confirm" messages via the background service worker.
+    dbg("start in frame", location.href, "runtime?", !!(typeof chrome !== "undefined" && chrome && chrome.runtime && chrome.runtime.connect));
     connectPort();
-
-    dbg("listeners attached in frame", location.href);
 
     // Watch for the picker footer appearing / re-rendering.
     const observer = new MutationObserver(scheduleScan);
