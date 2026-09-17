@@ -29,6 +29,25 @@
   const GDAF = self.GDAF;
   if (!GDAF) return; // settings.js failed to load; do nothing.
 
+  // Temporary debug logging. Enable by running in the picker frame console:
+  //   localStorage.setItem('gdafDebug', '1')   (then reload)
+  // Disable with localStorage.removeItem('gdafDebug').
+  let DEBUG = false;
+  try {
+    DEBUG = !!(self.localStorage && self.localStorage.getItem("gdafDebug"));
+  } catch (e) {
+    /* localStorage may be unavailable */
+  }
+  function dbg() {
+    if (!DEBUG) return;
+    try {
+      const args = Array.prototype.slice.call(arguments);
+      console.debug.apply(console, ["[gdaf]"].concat(args));
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
   // Coalesces bursts of mutations into a single scan.
   let scanScheduled = false;
 
@@ -330,6 +349,13 @@
   //   - otherwise -> leave to Gmail.
   function confirmDocRow(event) {
     const footer = findFooter(document);
+    dbg("confirmDocRow", {
+      type: event.type,
+      footer: !!footer,
+      hasLink: !!(footer && footer.linkBtn),
+      hasAttach: !!(footer && footer.attachBtn),
+      attachDisabled: footer && footer.attachBtn ? isDisabled(footer.attachBtn) : null
+    });
     if (!footer || !footer.linkBtn) return false;
     const attachBtn = footer.attachBtn;
 
@@ -338,6 +364,7 @@
       event.stopImmediatePropagation();
       synthesizing = true;
       try {
+        dbg("confirmDocRow -> clicking attach");
         attachBtn.click();
       } finally {
         setTimeout(() => {
@@ -349,6 +376,7 @@
     }
     if (!isDisabled(footer.linkBtn)) {
       // Native Google doc: suppress so a link is not inserted by accident.
+      dbg("confirmDocRow -> suppress (native doc)");
       event.preventDefault();
       event.stopImmediatePropagation();
       lastConfirmAt = Date.now();
@@ -385,6 +413,12 @@
 
   function onClick(event) {
     const row = eligible(event.target);
+    dbg("onClick", {
+      targetTag: event.target && event.target.tagName,
+      eligibleRow: !!row,
+      override: GDAF.current.overrideDefaultAction,
+      synthesizing
+    });
     if (!row) {
       lastClickId = null;
       return;
@@ -392,6 +426,7 @@
     const id = rowId(row) || "(row)";
     const now = Date.now();
     const isSecond = id === lastClickId && now - lastClickAt < DOUBLE_MS;
+    dbg("onClick row", { id, lastClickId, dt: now - lastClickAt, isSecond });
 
     if (isSecond) {
       lastClickId = null;
@@ -408,6 +443,11 @@
   // job (if the click path somehow missed it) or neutralise Gmail's built-in
   // dblclick-to-link when we already handled it via clicks.
   function onDblClick(event) {
+    dbg("onDblClick", {
+      targetTag: event.target && event.target.tagName,
+      recentlyConfirmed: Date.now() - lastConfirmAt < 700,
+      eligibleRow: !!eligible(event.target)
+    });
     if (Date.now() - lastConfirmAt < 700) {
       // Already handled via the click path; just stop Gmail's own dblclick.
       event.preventDefault();
@@ -451,6 +491,7 @@
     document.addEventListener("click", onClick, true);
     document.addEventListener("dblclick", onDblClick, true);
     document.addEventListener("keydown", onKeyDown, true);
+    dbg("listeners attached in frame", location.href);
 
     // Watch for the picker footer appearing / re-rendering.
     const observer = new MutationObserver(scheduleScan);
