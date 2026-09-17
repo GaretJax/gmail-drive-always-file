@@ -312,11 +312,8 @@
 
   // The Drive picker renders the file grid and the footer buttons in separate
   // (same-origin) iframes. Clicks fire in the grid frame, but the buttons live
-  // in another frame. We bridge them with a BroadcastChannel: the grid frame
-  // suppresses the default and broadcasts "confirm", and whichever frame owns
-  // the footer clicks the attachment button. (Set up in start().)
-  let channel = null;
-
+  // in another frame. Because the frames share an origin, we can reach the
+  // other frames' documents directly and click the button there.
   function doAttachClick(attachBtn) {
     synthesizing = true;
     try {
@@ -328,30 +325,60 @@
     }
   }
 
-  function broadcastConfirm() {
-    if (!channel) return;
-    try {
-      channel.postMessage({ type: "confirm" });
-    } catch (e) {
-      /* channel closed */
+  // Every same-origin document reachable from this frame (this frame plus any
+  // accessible parent/sibling/child picker frames). Cross-origin frames throw
+  // on access and are skipped.
+  function accessibleDocuments() {
+    const docs = [];
+    const seenWin = new Set();
+    function visit(win) {
+      if (!win || seenWin.has(win)) return;
+      seenWin.add(win);
+      let doc = null;
+      try {
+        doc = win.document;
+      } catch (e) {
+        return; // cross-origin frame
+      }
+      if (doc && docs.indexOf(doc) === -1) docs.push(doc);
+      let frames;
+      try {
+        frames = win.frames;
+      } catch (e) {
+        return;
+      }
+      for (let i = 0; i < frames.length; i++) {
+        try {
+          visit(frames[i]);
+        } catch (e) {
+          /* skip inaccessible frame */
+        }
+      }
     }
+    let top = window;
+    try {
+      top = window.top || window;
+    } catch (e) {
+      top = window;
+    }
+    visit(top);
+    if (docs.indexOf(document) === -1) docs.push(document);
+    return docs;
   }
 
-  // Received from another frame: if THIS frame owns the footer, do the attach.
-  // The originating (grid) frame has already suppressed the default, so for a
-  // native Google doc (attachment disabled) we simply do nothing here.
-  function remoteConfirm() {
-    if (!GDAF.current.overrideDefaultAction) return;
-    const footer = findFooter(document);
-    dbg("remoteConfirm", {
-      footer: !!footer,
-      hasAttach: !!(footer && footer.attachBtn),
-      attachDisabled:
-        footer && footer.attachBtn ? isDisabled(footer.attachBtn) : null
-    });
-    if (!footer || !footer.attachBtn) return;
-    if (isDisabled(footer.attachBtn)) return;
-    doAttachClick(footer.attachBtn);
+  // Find the footer (attach/link buttons) in whichever accessible frame owns
+  // it, not just the current one.
+  function findFooterAnywhere() {
+    const docs = accessibleDocuments();
+    for (const doc of docs) {
+      try {
+        const footer = findFooter(doc);
+        if (footer && footer.linkBtn) return footer;
+      } catch (e) {
+        /* skip */
+      }
+    }
+    return null;
   }
 
   // The nearest picker row (file/doc/folder) at or above `node`, or null.
@@ -392,7 +419,8 @@
   //     stray Drive link;
   //   - otherwise -> leave to Gmail.
   function confirmDocRow(event) {
-    const footer = findFooter(document);
+    // The footer may be in this frame or a sibling picker frame.
+    const footer = findFooterAnywhere();
     dbg("confirmDocRow", {
       type: event.type,
       footer: !!footer,
@@ -400,37 +428,26 @@
       hasAttach: !!(footer && footer.attachBtn),
       attachDisabled: footer && footer.attachBtn ? isDisabled(footer.attachBtn) : null
     });
-    if (footer && footer.linkBtn) {
-      // This frame owns the footer: handle it directly.
-      const attachBtn = footer.attachBtn;
-      if (attachBtn && !isDisabled(attachBtn)) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        dbg("confirmDocRow -> clicking attach (local)");
-        doAttachClick(attachBtn);
-        lastConfirmAt = Date.now();
-        return true;
-      }
-      if (!isDisabled(footer.linkBtn)) {
-        // Native Google doc: suppress so a link is not inserted by accident.
-        dbg("confirmDocRow -> suppress (native doc, local)");
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        lastConfirmAt = Date.now();
-        return true;
-      }
-      return false;
-    }
+    if (!footer || !footer.linkBtn) return false;
 
-    // Footer lives in another frame. The caller has already confirmed this is a
-    // document/file row, so suppress the default here (no stray Drive link) and
-    // ask the footer-owning frame to attach if it can.
-    dbg("confirmDocRow -> cross-frame confirm");
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    lastConfirmAt = Date.now();
-    broadcastConfirm();
-    return true;
+    const attachBtn = footer.attachBtn;
+    if (attachBtn && !isDisabled(attachBtn)) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      dbg("confirmDocRow -> clicking attach");
+      doAttachClick(attachBtn);
+      lastConfirmAt = Date.now();
+      return true;
+    }
+    if (!isDisabled(footer.linkBtn)) {
+      // Native Google doc: suppress so a link is not inserted by accident.
+      dbg("confirmDocRow -> suppress (native doc)");
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      lastConfirmAt = Date.now();
+      return true;
+    }
+    return false;
   }
 
   // --- double-click, reconstructed from click events ---
@@ -539,17 +556,6 @@
     document.addEventListener("click", onClick, true);
     document.addEventListener("dblclick", onDblClick, true);
     document.addEventListener("keydown", onKeyDown, true);
-
-    // Cross-frame bridge (grid frame <-> footer frame).
-    try {
-      channel = new BroadcastChannel("gdaf-picker");
-      channel.onmessage = function (ev) {
-        if (ev && ev.data && ev.data.type === "confirm") remoteConfirm();
-      };
-    } catch (e) {
-      dbg("BroadcastChannel unavailable", String(e));
-    }
-
     dbg("listeners attached in frame", location.href);
 
     // Watch for the picker footer appearing / re-rendering.
