@@ -410,12 +410,19 @@
   //   - otherwise -> leave to Gmail.
   function confirmDocRow(event) {
     const footer = findFooter(document);
-    dbg("confirmDocRow", {
-      type: event.type,
-      localFooter: !!(footer && footer.linkBtn),
-      hasAttach: !!(footer && footer.attachBtn),
-      attachDisabled: footer && footer.attachBtn ? isDisabled(footer.attachBtn) : null
-    });
+    if (DEBUG) {
+      const c = collectCandidates(document);
+      const allBtns = document.querySelectorAll('button, [role="button"]').length;
+      dbg("confirmDocRow", {
+        type: event.type,
+        localFooter: !!(footer && footer.linkBtn),
+        hasAttach: !!(footer && footer.attachBtn),
+        attachDisabled: footer && footer.attachBtn ? isDisabled(footer.attachBtn) : null,
+        localAttachCandidates: c.attach.length,
+        localLinkCandidates: c.link.length,
+        localButtons: allBtns
+      });
+    }
 
     if (footer && footer.linkBtn) {
       // This frame owns the footer: handle directly.

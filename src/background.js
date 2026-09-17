@@ -28,18 +28,40 @@ chrome.runtime.onConnect.addListener((port) => {
     portsByTab.set(tabId, set);
   }
   set.add(port);
+  try {
+    console.log(
+      "[gdaf-bg] connect tab",
+      tabId,
+      "frame",
+      port.sender && port.sender.frameId,
+      port.sender && port.sender.url,
+      "ports now",
+      set.size
+    );
+  } catch (e) {}
 
   port.onMessage.addListener((msg) => {
     if (!msg || msg.type !== "confirm") return;
-    // Forward to every other frame's content script in the same tab.
+    let forwarded = 0;
     for (const other of set) {
       if (other === port) continue;
       try {
         other.postMessage({ type: "do-confirm" });
+        forwarded++;
       } catch (e) {
         /* port gone; onDisconnect will clean it up */
       }
     }
+    try {
+      console.log(
+        "[gdaf-bg] confirm from frame",
+        port.sender && port.sender.frameId,
+        "forwarded to",
+        forwarded,
+        "of",
+        set.size - 1
+      );
+    } catch (e) {}
   });
 
   port.onDisconnect.addListener(() => {
