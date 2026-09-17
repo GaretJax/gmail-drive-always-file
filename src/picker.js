@@ -242,6 +242,11 @@
   function applySwap(attachBtn, linkBtn) {
     learnPrefixes(attachBtn, linkBtn);
 
+    // Cache the real buttons: the picker tears the footer down and rebuilds it
+    // during a double-click, so a fresh query can momentarily find nothing.
+    cachedAttach = attachBtn;
+    cachedLink = linkBtn;
+
     if (primaryPrefix && secondaryPrefix) {
       // Give attachment the primary look, link the secondary look (whole
       // subtree, so labels/icons are restyled too). Preserves each button's
@@ -315,6 +320,10 @@
   // attachment button is not re-processed.
   let synthesizing = false;
 
+  // Last-seen footer buttons, cached so we can still act during a re-render.
+  let cachedAttach = null;
+  let cachedLink = null;
+
   // The Drive picker renders the file grid and the footer buttons in separate
   // sandboxed / opaque-origin iframes. Clicks fire in the grid frame, but the
   // buttons live in another frame that we can't reach via BroadcastChannel or
@@ -327,38 +336,6 @@
     synthesizing = true;
     try {
       attachBtn.click();
-    } finally {
-      setTimeout(() => {
-        synthesizing = false;
-      }, 0);
-    }
-  }
-
-  // Reproduce an Enter keypress on an element. The picker's footer lives in a
-  // sandboxed frame we can't reach, but its native Enter gesture already
-  // inserts the selected file as an attachment, so for the cross-frame case we
-  // synthesize Enter on the row instead of clicking the (unreachable) button.
-  function pressEnter(el) {
-    if (!el) return;
-    synthesizing = true;
-    try {
-      try {
-        if (el.focus) el.focus();
-      } catch (e) {
-        /* not focusable */
-      }
-      const opts = {
-        key: "Enter",
-        code: "Enter",
-        keyCode: 13,
-        which: 13,
-        bubbles: true,
-        cancelable: true,
-        view: window
-      };
-      el.dispatchEvent(new KeyboardEvent("keydown", opts));
-      el.dispatchEvent(new KeyboardEvent("keypress", opts));
-      el.dispatchEvent(new KeyboardEvent("keyup", opts));
     } finally {
       setTimeout(() => {
         synthesizing = false;
@@ -435,76 +412,6 @@
     return el.getAttribute("data-is-doc-name") === "true";
   }
 
-  // A stable identity for a row, so we can recognise two clicks on the "same"
-  // file even though the picker replaces the element between clicks.
-  function rowId(el) {
-    return (el && el.getAttribute && el.getAttribute("data-id")) || null;
-  }
-
-  // Act on a confirmed "open this file" gesture. Returns true if we took over.
-  //   - attachable file -> insert as attachment;
-  //   - native Google doc (attach disabled, link enabled) -> suppress, so no
-  //     stray Drive link;
-  //   - otherwise -> leave to Gmail.
-  function confirmDocRow(event) {
-    const footer = findFooter(document);
-    if (DEBUG) {
-      const c = collectCandidates(document);
-      const allBtns = document.querySelectorAll('button, [role="button"]').length;
-      dbg("confirmDocRow", {
-        type: event.type,
-        localFooter: !!(footer && footer.linkBtn),
-        hasAttach: !!(footer && footer.attachBtn),
-        attachDisabled: footer && footer.attachBtn ? isDisabled(footer.attachBtn) : null,
-        localAttachCandidates: c.attach.length,
-        localLinkCandidates: c.link.length,
-        localButtons: allBtns
-      });
-    }
-
-    if (footer && footer.linkBtn) {
-      // This frame owns the footer: handle directly.
-      const attachBtn = footer.attachBtn;
-      if (attachBtn && !isDisabled(attachBtn)) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        dbg("confirmDocRow -> clicking attach (local)");
-        doAttachClick(attachBtn);
-        lastConfirmAt = Date.now();
-        return true;
-      }
-      if (!isDisabled(footer.linkBtn)) {
-        dbg("confirmDocRow -> suppress native doc (local)");
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        lastConfirmAt = Date.now();
-        return true;
-      }
-      return false;
-    }
-
-    // Footer is in another (sandboxed) frame we can't reach. Suppress the
-    // native double-click and reproduce the Enter gesture on the row, which the
-    // picker already turns into an attachment.
-    dbg("confirmDocRow -> synth Enter on row");
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    lastConfirmAt = Date.now();
-    const row = closestRow(event.target) || event.target;
-    pressEnter(row);
-    return true;
-  }
-
-  // --- double-click, reconstructed from click events ---
-  //
-  // The picker re-renders a file tile when it becomes selected, so the browser
-  // often never fires a native `dblclick` on a single stable element. We detect
-  // a double-click ourselves: two clicks on the same row (by data-id) within a
-  // short window. The first click is left alone (it selects the file); the
-  // second is taken over.
-  const DOUBLE_MS = 500;
-  let lastClickId = null;
-  let lastClickAt = 0;
   let lastConfirmAt = 0;
 
   function eligible(target) {
@@ -521,45 +428,65 @@
     return row;
   }
 
-  function onClick(event) {
-    const row = eligible(event.target);
-    dbg("onClick", {
-      targetTag: event.target && event.target.tagName,
-      eligibleRow: !!row,
-      override: GDAF.current.overrideDefaultAction,
-      synthesizing
-    });
-    if (!row) {
-      lastClickId = null;
-      return;
-    }
-    const id = rowId(row) || "(row)";
-    const now = Date.now();
-    const isSecond = id === lastClickId && now - lastClickAt < DOUBLE_MS;
-    dbg("onClick row", { id, lastClickId, dt: now - lastClickAt, isSecond });
-
-    if (isSecond) {
-      lastClickId = null;
-      lastClickAt = 0;
-      confirmDocRow(event); // preventDefault/stop happen inside on takeover
-    } else {
-      // First click: remember it, let selection happen normally.
-      lastClickId = id;
-      lastClickAt = now;
-    }
+  // The footer, from a fresh query, falling back to the cached button refs. The
+  // picker rebuilds the footer during a double-click, so a fresh query can find
+  // nothing for a moment even though the buttons are (about to be) there.
+  function currentFooter() {
+    const f = findFooter(document);
+    if (f && f.linkBtn) return f;
+    const a =
+      cachedAttach && document.contains(cachedAttach) && isVisible(cachedAttach)
+        ? cachedAttach
+        : null;
+    const l =
+      cachedLink && document.contains(cachedLink) && isVisible(cachedLink)
+        ? cachedLink
+        : null;
+    if (a || l) return { attachBtn: a, linkBtn: l || a };
+    return null;
   }
 
-  // Fallback + suppressor: if a native dblclick does fire, either finish the
-  // job (if the click path somehow missed it) or neutralise Gmail's built-in
-  // dblclick-to-link when we already handled it via clicks.
+  // After suppressing the native gesture, attach as soon as the (possibly
+  // re-rendering) footer is available. Retries briefly to ride out re-renders.
+  function attachWithRetry() {
+    let tries = 0;
+    const maxTries = 20; // ~0.8s at 40ms steps
+    const tick = function () {
+      tries++;
+      const footer = currentFooter();
+      if (footer && footer.attachBtn && !isDisabled(footer.attachBtn)) {
+        dbg("attachWithRetry -> click attach", { tries });
+        doAttachClick(footer.attachBtn);
+        return;
+      }
+      if (footer && footer.linkBtn && (!footer.attachBtn || isDisabled(footer.attachBtn))) {
+        // Native Google doc: link stays suppressed, nothing to attach.
+        dbg("attachWithRetry -> native doc (suppressed)", { tries });
+        return;
+      }
+      if (tries < maxTries) {
+        setTimeout(tick, 40);
+      } else {
+        dbg("attachWithRetry -> gave up", { tries });
+      }
+    };
+    tick();
+  }
+
+  // Confirm gesture on a document/file row: suppress the built-in action (so a
+  // Drive link is never inserted) and attach instead, once the footer settles.
+  function confirmDocRow(event) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    lastConfirmAt = Date.now();
+    dbg("confirmDocRow", { type: event.type });
+    attachWithRetry();
+    return true;
+  }
+
   function onDblClick(event) {
-    dbg("onDblClick", {
-      targetTag: event.target && event.target.tagName,
-      recentlyConfirmed: Date.now() - lastConfirmAt < 700,
-      eligibleRow: !!eligible(event.target)
-    });
     if (Date.now() - lastConfirmAt < 700) {
-      // Already handled via the click path; just stop Gmail's own dblclick.
+      // Already handled; make sure the native dblclick doesn't also fire.
       event.preventDefault();
       event.stopImmediatePropagation();
       return;
@@ -594,11 +521,9 @@
   }
 
   function start() {
-    // Capture-phase listeners so we run before Gmail's own handlers and can
-    // suppress them. We reconstruct double-click from `click` (the picker
-    // re-renders tiles between clicks, so native `dblclick` is unreliable);
-    // `dblclick` stays as a fallback/suppressor, and Enter confirms too.
-    document.addEventListener("click", onClick, true);
+    // Capture-phase listeners so we run before the picker's own handlers and
+    // can suppress them. Single clicks are left untouched (they select the file
+    // and keep the footer rendered); we only take over the confirm gesture.
     document.addEventListener("dblclick", onDblClick, true);
     document.addEventListener("keydown", onKeyDown, true);
 
