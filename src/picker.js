@@ -334,6 +334,38 @@
     }
   }
 
+  // Reproduce an Enter keypress on an element. The picker's footer lives in a
+  // sandboxed frame we can't reach, but its native Enter gesture already
+  // inserts the selected file as an attachment, so for the cross-frame case we
+  // synthesize Enter on the row instead of clicking the (unreachable) button.
+  function pressEnter(el) {
+    if (!el) return;
+    synthesizing = true;
+    try {
+      try {
+        if (el.focus) el.focus();
+      } catch (e) {
+        /* not focusable */
+      }
+      const opts = {
+        key: "Enter",
+        code: "Enter",
+        keyCode: 13,
+        which: 13,
+        bubbles: true,
+        cancelable: true,
+        view: window
+      };
+      el.dispatchEvent(new KeyboardEvent("keydown", opts));
+      el.dispatchEvent(new KeyboardEvent("keypress", opts));
+      el.dispatchEvent(new KeyboardEvent("keyup", opts));
+    } finally {
+      setTimeout(() => {
+        synthesizing = false;
+      }, 0);
+    }
+  }
+
   function connectPort() {
     try {
       port = chrome.runtime.connect({ name: "gdaf" });
@@ -451,14 +483,15 @@
       return false;
     }
 
-    // Footer is in another frame. The caller already confirmed this is a
-    // document/file row, so suppress the default here (no stray Drive link) and
-    // ask the footer-owning frame (via the background) to attach if it can.
-    dbg("confirmDocRow -> cross-frame confirm");
+    // Footer is in another (sandboxed) frame we can't reach. Suppress the
+    // native double-click and reproduce the Enter gesture on the row, which the
+    // picker already turns into an attachment.
+    dbg("confirmDocRow -> synth Enter on row");
     event.preventDefault();
     event.stopImmediatePropagation();
     lastConfirmAt = Date.now();
-    sendConfirm();
+    const row = closestRow(event.target) || event.target;
+    pressEnter(row);
     return true;
   }
 
