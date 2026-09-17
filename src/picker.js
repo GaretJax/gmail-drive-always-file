@@ -334,20 +334,29 @@
     function visit(win) {
       if (!win || seenWin.has(win)) return;
       seenWin.add(win);
-      let doc = null;
+      // A cross-origin window still lets us read its child frame list, so if
+      // .document throws we skip the doc but MUST keep descending -- otherwise
+      // we never reach the same-origin picker frames nested under the
+      // cross-origin Gmail top window.
       try {
-        doc = win.document;
+        const doc = win.document;
+        if (doc && docs.indexOf(doc) === -1) docs.push(doc);
       } catch (e) {
-        return; // cross-origin frame
+        /* cross-origin: no document, but still recurse into its frames */
       }
-      if (doc && docs.indexOf(doc) === -1) docs.push(doc);
       let frames;
       try {
         frames = win.frames;
       } catch (e) {
         return;
       }
-      for (let i = 0; i < frames.length; i++) {
+      let count = 0;
+      try {
+        count = frames.length;
+      } catch (e) {
+        return;
+      }
+      for (let i = 0; i < count; i++) {
         try {
           visit(frames[i]);
         } catch (e) {
@@ -370,6 +379,7 @@
   // it, not just the current one.
   function findFooterAnywhere() {
     const docs = accessibleDocuments();
+    dbg("findFooterAnywhere docs", docs.length);
     for (const doc of docs) {
       try {
         const footer = findFooter(doc);
