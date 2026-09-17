@@ -1,0 +1,144 @@
+:root {
+  color-scheme: light dark;
+  --fg: #202124;
+  --muted: #5f6368;
+  --accent: #1a73e8;
+  --border: #dadce0;
+  --bg: #ffffff;
+  --field-bg: #f8f9fa;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #e8eaed;
+    --muted: #9aa0a6;
+    --accent: #8ab4f8;
+    --border: #3c4043;
+    --bg: #202124;
+    --field-bg: #292a2d;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Google Sans", Roboto, Arial, system-ui, sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+main {
+  width: 380px;
+  max-width: 100%;
+  padding: 20px;
+}
+
+h1 {
+  font-size: 18px;
+  margin: 0 0 6px;
+}
+
+.intro {
+  color: var(--muted);
+  margin: 0 0 18px;
+}
+
+.option {
+  margin-bottom: 14px;
+}
+
+.option label {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  cursor: pointer;
+}
+
+.option input[type="checkbox"] {
+  margin-top: 3px;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.option span {
+  display: flex;
+  flex-direction: column;
+}
+
+.option small {
+  color: var(--muted);
+}
+
+.advanced {
+  margin: 8px 0 16px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.advanced summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.hint {
+  color: var(--muted);
+  margin: 10px 0;
+}
+
+.field {
+  margin-bottom: 10px;
+}
+
+.field label {
+  display: block;
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+
+.field input[type="text"] {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--field-bg);
+  color: var(--fg);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+.field input[type="text"]:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+button.secondary {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--accent);
+  padding: 8px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 500;
+}
+
+button.secondary:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+#status {
+  color: var(--muted);
+}

@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "Gmail Drive: Always Attach",
+  "version": "1.0.0",
+  "description": "Swaps Gmail's Google Drive picker so \"Insert as attachment\" becomes the default action (styling + double-click), while still allowing \"Insert as Drive link\".",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": ["storage"],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://docs.google.com/*",
+        "https://drive.google.com/*"
+      ],
+      "js": ["src/settings.js", "src/picker.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": false
+  },
+  "action": {
+    "default_title": "Gmail Drive: Always Attach",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  }
+}

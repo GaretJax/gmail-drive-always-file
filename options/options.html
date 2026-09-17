@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Gmail Drive: Always Attach — Options</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Gmail Drive: Always Attach</h1>
+      <p class="intro">
+        Makes <strong>Insert as attachment</strong> the default action in
+        Gmail's Google&nbsp;Drive picker, while keeping
+        <strong>Insert as Drive&nbsp;link</strong> available for the exceptions.
+      </p>
+
+      <section class="option">
+        <label>
+          <input type="checkbox" id="swapButtons" />
+          <span>
+            <strong>Swap the picker buttons</strong>
+            <small>Give "Insert as attachment" the primary/default styling and slot.</small>
+          </span>
+        </label>
+      </section>
+
+      <section class="option">
+        <label>
+          <input type="checkbox" id="overrideDoubleClick" />
+          <span>
+            <strong>Double-click inserts as attachment</strong>
+            <small>Double-clicking a file attaches it instead of inserting a Drive link.</small>
+          </span>
+        </label>
+      </section>
+
+      <details class="advanced">
+        <summary>Advanced: button label matching (for other languages)</summary>
+        <p class="hint">
+          The extension finds the two buttons by their text. If your Gmail is
+          not in English, enter case-insensitive patterns (regular expressions)
+          that appear in each button's label.
+        </p>
+        <div class="field">
+          <label for="attachmentPattern">Attachment button matches</label>
+          <input type="text" id="attachmentPattern" spellcheck="false" />
+        </div>
+        <div class="field">
+          <label for="linkPattern">Link button matches</label>
+          <input type="text" id="linkPattern" spellcheck="false" />
+        </div>
+      </details>
+
+      <div class="actions">
+        <button id="reset" type="button" class="secondary">Reset to defaults</button>
+        <span id="status" role="status" aria-live="polite"></span>
+      </div>
+    </main>
+    <script src="../src/settings.js"></script>
+    <script src="options.js"></script>
+  </body>
+</html>
