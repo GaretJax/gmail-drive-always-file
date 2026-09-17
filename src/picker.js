@@ -373,8 +373,11 @@
     if (synthesizing) return null;
     if (!GDAF.current.overrideDefaultAction) return null;
     if (!target) return null;
-    // Never interfere with a gesture aimed at a button (the footer buttons).
-    if (target.closest && target.closest('button, [role="button"]')) return null;
+    // Act only when the gesture is inside a document/file row. This naturally
+    // excludes the footer buttons (they aren't inside a role="option" row), so
+    // we don't need a separate button guard -- and, crucially, it still fires
+    // when a click lands on an inner clickable element within a file tile
+    // (the tiles contain their own [role="button"] hit areas).
     const row = closestRow(target);
     if (!isDocRow(row)) return null;
     return row;
