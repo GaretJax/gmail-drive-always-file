@@ -65,14 +65,19 @@ Google's CSS class names are obfuscated and change often, so the extension
 
 - Locates the two buttons by their visible text / `aria-label`
   (matching the words *attachment* and *link*, case‑insensitively).
-- Swaps them by exchanging their **DOM position** and their **`class`
-  attribute** — each button keeps its own label and click handler but adopts
-  the other's slot and styling. This is why the (now‑default) attachment
-  button gets the exact primary styling Gmail would have given the link
-  button.
-- Uses a `MutationObserver` to re‑apply the swap whenever the picker
-  re‑renders, and a capture‑phase `dblclick` listener to intercept
-  double‑clicks before Gmail's own handler runs.
+- Restyles them by **swapping their component class prefix**. The picker gives
+  the two buttons identical classes except for a per‑component prefix (one is
+  the primary/filled style, the other the secondary style), so rewriting that
+  prefix across each button's whole subtree makes the attachment button adopt
+  the primary styling and the link button the secondary styling — while
+  preserving each button's own enabled/disabled state, so a disabled
+  attachment button still looks disabled.
+- Places the attachment button on the **right** using CSS flexbox `order`
+  (an inline style), rather than moving DOM nodes, so it doesn't fight
+  Google's incremental‑DOM reconciliation.
+- Uses a `MutationObserver` to re‑apply the styling whenever the picker
+  re‑renders, and capture‑phase `dblclick` / `keydown` listeners to intercept
+  the confirm gesture before Gmail's own handler runs.
 
 Because everything keys off the button *text*, adapting to another language
 is just a matter of changing two patterns in the options — no code changes.

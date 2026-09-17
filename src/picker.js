@@ -179,26 +179,29 @@
     return dash > 0 ? first.slice(0, dash) : first;
   }
 
-  // Rewrite every class token on `el` whose prefix is `from` to use `to`,
-  // preserving state-variant tokens (e.g. the disabled marker). Returns true
-  // if anything changed.
-  function reprefix(el, from, to) {
-    if (!from || !to || from === to) return false;
-    const cls = el.getAttribute("class") || "";
-    if (!cls) return false;
-    const out = cls
-      .split(/\s+/)
-      .map((tok) => {
-        if (tok === from) return to;
-        if (tok.indexOf(from + "-") === 0) return to + tok.slice(from.length);
-        return tok;
-      })
-      .join(" ");
-    if (out !== cls) {
-      el.setAttribute("class", out);
-      return true;
+  // Rewrite every class token whose prefix is `from` to use `to`, on `el` AND
+  // all of its descendants. The picker scopes a button's label, icon, ripple,
+  // etc. with the same component prefix as the button, so restyling must cover
+  // the whole subtree (otherwise the label loses its styling and disappears).
+  // State-variant tokens (e.g. the disabled marker) are preserved.
+  function reprefixTree(el, from, to) {
+    if (!from || !to || from === to || !el) return;
+    const nodes = [el];
+    const descendants = el.querySelectorAll("*");
+    for (let i = 0; i < descendants.length; i++) nodes.push(descendants[i]);
+    for (const node of nodes) {
+      const cls = node.getAttribute && node.getAttribute("class");
+      if (!cls) continue;
+      const out = cls
+        .split(/\s+/)
+        .map((tok) => {
+          if (tok === from) return to;
+          if (tok.indexOf(from + "-") === 0) return to + tok.slice(from.length);
+          return tok;
+        })
+        .join(" ");
+      if (out !== cls) node.setAttribute("class", out);
     }
-    return false;
   }
 
   // Learn the primary (link) and secondary (attachment) style prefixes once,
@@ -215,31 +218,26 @@
   }
 
   // Make the attachment button primary and the link button secondary, and put
-  // the (default) attachment button in the right-hand primary slot. Idempotent:
-  // safe to run on every scan, and it re-asserts itself if Gmail re-renders.
+  // the (default) attachment button in the right-hand slot. Idempotent: safe to
+  // run on every scan, and it re-asserts itself if Gmail re-renders.
   function applySwap(attachBtn, linkBtn) {
     learnPrefixes(attachBtn, linkBtn);
 
     if (primaryPrefix && secondaryPrefix) {
-      // Give attachment the primary look, link the secondary look. Preserves
-      // each button's own enabled/disabled variant tokens, so a disabled
-      // attachment stays greyed (just greyed-primary) in the fallback.
-      reprefix(attachBtn, secondaryPrefix, primaryPrefix);
-      reprefix(linkBtn, primaryPrefix, secondaryPrefix);
+      // Give attachment the primary look, link the secondary look (whole
+      // subtree, so labels/icons are restyled too). Preserves each button's
+      // own enabled/disabled variant tokens, so a disabled attachment stays
+      // greyed (just greyed-primary) in the fallback.
+      reprefixTree(attachBtn, secondaryPrefix, primaryPrefix);
+      reprefixTree(linkBtn, primaryPrefix, secondaryPrefix);
     }
 
-    // Put the attachment button after the link button (primary on the right),
-    // only when they are siblings so we never disturb unexpected layouts.
-    const parent = linkBtn.parentNode;
-    if (
-      parent &&
-      attachBtn.parentNode === parent &&
-      linkBtn.compareDocumentPosition(attachBtn) &
-        Node.DOCUMENT_POSITION_PRECEDING
-    ) {
-      // attachBtn currently precedes linkBtn -> move it just after linkBtn.
-      parent.insertBefore(attachBtn, linkBtn.nextSibling);
-    }
+    // Place the attachment button on the right via flexbox order (the footer is
+    // a flex row). Using `order` instead of moving DOM nodes avoids fighting
+    // Google's incremental-DOM reconciliation, and is a no-op if the container
+    // isn't flex. Higher order value = further to the right.
+    if (attachBtn.style.order !== "2") attachBtn.style.order = "2";
+    if (linkBtn.style.order !== "1") linkBtn.style.order = "1";
   }
 
   function runSwap(root) {
