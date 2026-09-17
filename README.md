@@ -17,10 +17,10 @@ It does two things when the Drive picker's footer appears:
 If a selected file can only be linked (e.g. a native Google Doc/Sheet, which
 Gmail can't attach as a file), the extension keeps both buttons but leaves the
 **attachment button disabled in the primary slot**, so the link button is
-demoted to the secondary position and can't be clicked by accident. In that
-fallback, double‑click and Enter do **nothing** (they never insert a link
-behind your back) — you insert a link only by clicking "Insert as Drive link"
-on purpose.
+demoted to the secondary style and is far less likely to be clicked by
+accident. The double‑click / Enter override only fires when the attachment
+option is actually available, so it never blocks folder navigation or other
+built‑in behaviour.
 
 ## Install (unpacked)
 
@@ -113,10 +113,11 @@ icons/                 Extension icons (generated, see scripts/)
 - The confirm‑gesture override triggers the *attachment* button for the file
   you double‑clicked / pressed Enter on. If you have a mix selected, use the
   buttons directly.
-- The disabled‑attachment fallback assumes Gmail renders both buttons and
-  disables the attachment one for native Google files. If your Gmail instead
-  omits the attachment button entirely for those files, the link button simply
-  stays in place (still demoted from being the double‑click/Enter default).
+- Double‑clicking / pressing Enter on a **native Google file** still follows
+  Gmail's default (a Drive link), because that gesture is intentionally left
+  alone unless attaching is possible (this keeps folder navigation working).
+  The buttons are still swapped, so the disabled attachment button occupies the
+  primary slot and the link button is de‑emphasised.
 
 ## Development
 

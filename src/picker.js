@@ -29,19 +29,30 @@
   const GDAF = self.GDAF;
   if (!GDAF) return; // settings.js failed to load; do nothing.
 
-  // Marks buttons we have already swapped so we don't ping-pong them on every
-  // mutation. If Google re-renders fresh button elements the marker is gone
-  // and we swap again, which is what we want.
-  const SWAP_ATTR = "data-gdaf-swapped";
-  // Marks our own container scan so repeated observer hits are cheap no-ops.
+  // Coalesces bursts of mutations into a single scan.
   let scanScheduled = false;
+
+  // The Drive picker styles its two footer buttons identically except for a
+  // per-component class prefix: the link (primary) button's classes are all
+  // prefixed one way, the attachment (secondary) button's another, and the
+  // disabled state merely adds one extra token. So we make the attachment
+  // button primary by swapping that prefix, which preserves each button's own
+  // state (enabled/disabled) while exchanging only the visual role. These hold
+  // the two prefixes, learned once from the buttons' natural (pre-swap) state.
+  let primaryPrefix = null; // link button's prefix (filled/primary style)
+  let secondaryPrefix = null; // attachment button's prefix (secondary style)
 
   /* ----------------------------- helpers ------------------------------ */
 
+  // Text used to recognise a button. The Drive picker's labels don't line up
+  // between aria-label and visible text (e.g. the link button reads
+  // aria-label="Insert 1 item" but shows "Add as link"), so we match against
+  // both combined.
   function labelOf(el) {
     if (!el) return "";
-    const aria = el.getAttribute && el.getAttribute("aria-label");
-    return String(aria || el.textContent || "").trim();
+    const aria = (el.getAttribute && el.getAttribute("aria-label")) || "";
+    const text = el.textContent || "";
+    return (aria + " " + text).trim();
   }
 
   function isVisible(el) {
@@ -158,42 +169,77 @@
     return { attachBtn: attach[0] || null, linkBtn: link[0] };
   }
 
-  // Swap two sibling-ish buttons: exchange DOM position and class attribute so
-  // the attachment button ends up where the (primary) link button was, wearing
-  // its styling, and vice versa. Each element keeps its own text + listeners.
-  function swapButtons(attachBtn, linkBtn) {
-    if (attachBtn.getAttribute(SWAP_ATTR) && linkBtn.getAttribute(SWAP_ATTR)) {
-      return false; // already done for these exact elements
+  // The per-component style prefix of an element (the part of its first class
+  // token before the first "-"). All of a picker button's classes share it.
+  function stylePrefix(el) {
+    const cls = (el.getAttribute("class") || "").trim();
+    if (!cls) return null;
+    const first = cls.split(/\s+/)[0];
+    const dash = first.indexOf("-");
+    return dash > 0 ? first.slice(0, dash) : first;
+  }
+
+  // Rewrite every class token on `el` whose prefix is `from` to use `to`,
+  // preserving state-variant tokens (e.g. the disabled marker). Returns true
+  // if anything changed.
+  function reprefix(el, from, to) {
+    if (!from || !to || from === to) return false;
+    const cls = el.getAttribute("class") || "";
+    if (!cls) return false;
+    const out = cls
+      .split(/\s+/)
+      .map((tok) => {
+        if (tok === from) return to;
+        if (tok.indexOf(from + "-") === 0) return to + tok.slice(from.length);
+        return tok;
+      })
+      .join(" ");
+    if (out !== cls) {
+      el.setAttribute("class", out);
+      return true;
+    }
+    return false;
+  }
+
+  // Learn the primary (link) and secondary (attachment) style prefixes once,
+  // from the buttons' natural state. The prefix identifies the component and is
+  // stable across enabled/disabled toggles, so learning from any state is safe.
+  function learnPrefixes(attachBtn, linkBtn) {
+    if (primaryPrefix && secondaryPrefix) return;
+    const lp = stylePrefix(linkBtn);
+    const ap = stylePrefix(attachBtn);
+    if (lp && ap && lp !== ap) {
+      primaryPrefix = lp;
+      secondaryPrefix = ap;
+    }
+  }
+
+  // Make the attachment button primary and the link button secondary, and put
+  // the (default) attachment button in the right-hand primary slot. Idempotent:
+  // safe to run on every scan, and it re-asserts itself if Gmail re-renders.
+  function applySwap(attachBtn, linkBtn) {
+    learnPrefixes(attachBtn, linkBtn);
+
+    if (primaryPrefix && secondaryPrefix) {
+      // Give attachment the primary look, link the secondary look. Preserves
+      // each button's own enabled/disabled variant tokens, so a disabled
+      // attachment stays greyed (just greyed-primary) in the fallback.
+      reprefix(attachBtn, secondaryPrefix, primaryPrefix);
+      reprefix(linkBtn, primaryPrefix, secondaryPrefix);
     }
 
-    const doc = attachBtn.ownerDocument;
-
-    // 1) Swap positions using a placeholder so it works whether or not the
-    //    two buttons are direct siblings.
-    const placeholder = doc.createComment("gdaf-swap");
-    const attachParent = attachBtn.parentNode;
-    const linkParent = linkBtn.parentNode;
-    if (!attachParent || !linkParent) return false;
-
-    attachParent.insertBefore(placeholder, attachBtn);
-    linkParent.insertBefore(attachBtn, linkBtn);
-    attachParent.insertBefore(linkBtn, placeholder);
-    placeholder.remove();
-
-    // 2) Swap the class attribute (visual styling: primary vs secondary), so
-    //    the attachment button now wears the link button's primary styling.
-    //    We deliberately do NOT touch each button's own disabled / aria-label
-    //    state: a disabled attachment button stays disabled (and looks it) in
-    //    the primary slot, and screen-reader labels stay attached to their
-    //    button.
-    const attachClass = attachBtn.getAttribute("class") || "";
-    const linkClass = linkBtn.getAttribute("class") || "";
-    attachBtn.setAttribute("class", linkClass);
-    linkBtn.setAttribute("class", attachClass);
-
-    attachBtn.setAttribute(SWAP_ATTR, "1");
-    linkBtn.setAttribute(SWAP_ATTR, "1");
-    return true;
+    // Put the attachment button after the link button (primary on the right),
+    // only when they are siblings so we never disturb unexpected layouts.
+    const parent = linkBtn.parentNode;
+    if (
+      parent &&
+      attachBtn.parentNode === parent &&
+      linkBtn.compareDocumentPosition(attachBtn) &
+        Node.DOCUMENT_POSITION_PRECEDING
+    ) {
+      // attachBtn currently precedes linkBtn -> move it just after linkBtn.
+      parent.insertBefore(attachBtn, linkBtn.nextSibling);
+    }
   }
 
   function runSwap(root) {
@@ -201,7 +247,7 @@
     const pair = findPair(root);
     if (!pair) return;
     try {
-      swapButtons(pair.attachBtn, pair.linkBtn);
+      applySwap(pair.attachBtn, pair.linkBtn);
     } catch (e) {
       /* leave the picker untouched on any unexpected DOM shape */
     }
@@ -217,18 +263,25 @@
   function isFileItem(node) {
     let el = node;
     for (let depth = 0; el && depth < 8; el = el.parentElement, depth++) {
-      const role = el.getAttribute && el.getAttribute("role");
-      if (role === "option" || role === "row" || role === "gridcell") return true;
-      // The Drive picker also uses data-id on file tiles.
-      if (el.hasAttribute && el.hasAttribute("data-id")) return true;
+      if (!el.getAttribute) continue;
+      const role = el.getAttribute("role");
+      if (role === "option" || role === "row" || role === "gridcell" || role === "listitem") {
+        return true;
+      }
     }
     return false;
   }
 
   // Handle a "confirm this file" gesture (double-click or Enter) on a file
-  // item. Insert as attachment when possible; otherwise suppress the default
-  // so a Drive link is never inserted by accident (the user can still click
-  // "Insert as Drive link" explicitly for the exceptions).
+  // item. We only take over when the attachment button is currently ENABLED,
+  // which is a reliable signal that an attachable file is selected: folders and
+  // native Google files leave it disabled, so double-clicking a folder to open
+  // it, or any other native behaviour, is never blocked.
+  //
+  // Note: when a native Google file is confirmed, Gmail still inserts a Drive
+  // link (attachment being impossible). Suppressing that specific case safely
+  // requires telling a native-file row apart from a folder row; that is a
+  // follow-up once the file/folder markup is confirmed.
   function handleDefaultAction(event) {
     if (synthesizing) return;
     if (!GDAF.current.overrideDefaultAction) return;
@@ -243,32 +296,26 @@
     // Only act on a gesture over an actual file item.
     if (!isFileItem(target)) return;
 
-    // Only engage inside a recognised picker footer.
+    // Only engage inside a recognised picker footer with an enabled attachment
+    // option. Anything else (folder, native file, nothing selected) is left to
+    // Gmail so we never break navigation or insert unexpectedly.
     const footer = findFooter(document);
     if (!footer || !footer.linkBtn) return;
-
     const attachBtn = footer.attachBtn;
+    if (!attachBtn || isDisabled(attachBtn)) return;
 
-    if (attachBtn && !isDisabled(attachBtn)) {
-      // Insert the just-selected file as an attachment instead of a link.
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      synthesizing = true;
-      try {
-        attachBtn.click();
-      } finally {
-        // Release on the next tick so any follow-on events from .click() that
-        // Google might dispatch are still recognised as ours.
-        setTimeout(() => {
-          synthesizing = false;
-        }, 0);
-      }
-    } else {
-      // Fallback: attachment is unavailable/disabled (e.g. a native Google
-      // Doc). Suppress the default action so a link is not inserted by
-      // accident. Double-click and Enter simply do nothing here.
-      event.preventDefault();
-      event.stopImmediatePropagation();
+    // Insert the just-selected file as an attachment instead of a link.
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    synthesizing = true;
+    try {
+      attachBtn.click();
+    } finally {
+      // Release on the next tick so any follow-on events from .click() that
+      // Google might dispatch are still recognised as ours.
+      setTimeout(() => {
+        synthesizing = false;
+      }, 0);
     }
   }
 
