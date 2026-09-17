@@ -10,7 +10,7 @@
 
   const fields = {
     swapButtons: document.getElementById("swapButtons"),
-    overrideDoubleClick: document.getElementById("overrideDoubleClick"),
+    overrideDefaultAction: document.getElementById("overrideDefaultAction"),
     attachmentPattern: document.getElementById("attachmentPattern"),
     linkPattern: document.getElementById("linkPattern")
   };
@@ -26,7 +26,7 @@
 
   function render(settings) {
     fields.swapButtons.checked = !!settings.swapButtons;
-    fields.overrideDoubleClick.checked = !!settings.overrideDoubleClick;
+    fields.overrideDefaultAction.checked = !!settings.overrideDefaultAction;
     fields.attachmentPattern.value = settings.attachmentPattern;
     fields.linkPattern.value = settings.linkPattern;
   }
@@ -48,8 +48,8 @@
   fields.swapButtons.addEventListener("change", (e) =>
     save({ swapButtons: e.target.checked })
   );
-  fields.overrideDoubleClick.addEventListener("change", (e) =>
-    save({ overrideDoubleClick: e.target.checked })
+  fields.overrideDefaultAction.addEventListener("change", (e) =>
+    save({ overrideDefaultAction: e.target.checked })
   );
 
   // Text patterns save on blur / Enter, and only when non-empty & valid.

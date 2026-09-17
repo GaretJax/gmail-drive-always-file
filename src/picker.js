@@ -99,25 +99,28 @@
 
   /* --------------------------- button swap ---------------------------- */
 
-  // Find the attachment/link button pair inside `root`, if present and ready.
-  // Considers every attach candidate against every link candidate and picks
-  // the closest pair (smallest combined depth to their common ancestor), so a
-  // stray text match elsewhere in the picker doesn't defeat the real footer.
-  function findPair(root) {
+  // Collect the visible attachment / link button candidates in `root`.
+  // A disabled button still counts as a candidate: for native Google files
+  // Gmail disables the attachment option, and we want to keep (and style) it.
+  function collectCandidates(root) {
     const buttons = clickables(root).filter(isVisible);
-
-    const attachCandidates = [];
-    const linkCandidates = [];
+    const attach = [];
+    const link = [];
     for (const btn of buttons) {
       const text = labelOf(btn);
       if (!text) continue;
       // Attachment is tested first: a label containing both words is treated
       // as the attachment button, not the link button.
-      if (GDAF.attachmentRe.test(text)) attachCandidates.push(btn);
-      else if (GDAF.linkRe.test(text)) linkCandidates.push(btn);
+      if (GDAF.attachmentRe.test(text)) attach.push(btn);
+      else if (GDAF.linkRe.test(text)) link.push(btn);
     }
-    if (!attachCandidates.length || !linkCandidates.length) return null;
+    return { attach, link };
+  }
 
+  // From candidate lists, pick the closest attach/link pair (smallest combined
+  // depth to their common ancestor within MAX_DEPTH), so a stray text match
+  // elsewhere in the picker doesn't defeat the real footer.
+  function closestPair(attachCandidates, linkCandidates) {
     const MAX_DEPTH = 6;
     let best = null;
     for (const attachBtn of attachCandidates) {
@@ -128,16 +131,31 @@
         const da = depthTo(attachBtn, ancestor);
         const dl = depthTo(linkBtn, ancestor);
         if (da < 0 || dl < 0) continue;
-        const score = da + dl;
-        // Only a genuinely close pair (a shared footer container) qualifies.
         if (da > MAX_DEPTH || dl > MAX_DEPTH) continue;
-        if (!best || score < best.score) {
-          best = { attachBtn, linkBtn, score };
-        }
+        const score = da + dl;
+        if (!best || score < best.score) best = { attachBtn, linkBtn, score };
       }
     }
-
     return best ? { attachBtn: best.attachBtn, linkBtn: best.linkBtn } : null;
+  }
+
+  // The picker footer pair (both buttons must exist to swap them).
+  function findPair(root) {
+    const { attach, link } = collectCandidates(root);
+    if (!attach.length || !link.length) return null;
+    return closestPair(attach, link);
+  }
+
+  // The picker footer for the default-action override. Tolerates a missing
+  // attachment button (attachBtn may be null); linkBtn identifies the footer.
+  function findFooter(root) {
+    const { attach, link } = collectCandidates(root);
+    if (!link.length) return null;
+    if (attach.length) {
+      const pair = closestPair(attach, link);
+      if (pair) return pair;
+    }
+    return { attachBtn: attach[0] || null, linkBtn: link[0] };
   }
 
   // Swap two sibling-ish buttons: exchange DOM position and class attribute so
@@ -162,30 +180,20 @@
     attachParent.insertBefore(linkBtn, placeholder);
     placeholder.remove();
 
-    // 2) Swap the class attribute (visual styling: primary vs secondary).
+    // 2) Swap the class attribute (visual styling: primary vs secondary), so
+    //    the attachment button now wears the link button's primary styling.
+    //    We deliberately do NOT touch each button's own disabled / aria-label
+    //    state: a disabled attachment button stays disabled (and looks it) in
+    //    the primary slot, and screen-reader labels stay attached to their
+    //    button.
     const attachClass = attachBtn.getAttribute("class") || "";
     const linkClass = linkBtn.getAttribute("class") || "";
     attachBtn.setAttribute("class", linkClass);
     linkBtn.setAttribute("class", attachClass);
 
-    // 3) Move the visual "default/primary" hints that Google may set via
-    //    attributes rather than class.
-    swapAttr(attachBtn, linkBtn, "autofocus");
-    // Keep aria-label in step with each button's own text (do NOT swap it):
-    // labels stay attached to their button so screen readers stay correct.
-
     attachBtn.setAttribute(SWAP_ATTR, "1");
     linkBtn.setAttribute(SWAP_ATTR, "1");
     return true;
-  }
-
-  function swapAttr(a, b, name) {
-    const av = a.getAttribute(name);
-    const bv = b.getAttribute(name);
-    if (bv !== null) a.setAttribute(name, bv);
-    else a.removeAttribute(name);
-    if (av !== null) b.setAttribute(name, av);
-    else b.removeAttribute(name);
   }
 
   function runSwap(root) {
@@ -199,7 +207,7 @@
     }
   }
 
-  /* ----------------------- double-click override ---------------------- */
+  /* ------------- default-action override (double-click + Enter) -------- */
 
   // True while we are the ones synthesising a click, so our own click on the
   // attachment button is not re-processed.
@@ -217,60 +225,62 @@
     return false;
   }
 
-  function currentAttachButton(root) {
-    // After a swap the attachment button still carries the attachment text,
-    // so we locate it by label regardless of styling.
-    const buttons = clickables(root).filter(isVisible);
-    for (const btn of buttons) {
-      if (GDAF.attachmentRe.test(labelOf(btn))) return btn;
-    }
-    return null;
-  }
-
-  function onDblClick(event) {
+  // Handle a "confirm this file" gesture (double-click or Enter) on a file
+  // item. Insert as attachment when possible; otherwise suppress the default
+  // so a Drive link is never inserted by accident (the user can still click
+  // "Insert as Drive link" explicitly for the exceptions).
+  function handleDefaultAction(event) {
     if (synthesizing) return;
-    if (!GDAF.current.overrideDoubleClick) return;
+    if (!GDAF.current.overrideDefaultAction) return;
 
     const target = event.target;
     if (!target) return;
 
-    // Ignore double-clicks on the footer buttons themselves.
-    if (
-      target.closest &&
-      target.closest('button, [role="button"]')
-    ) {
-      return;
-    }
+    // Never interfere with a gesture aimed at a button (the footer buttons
+    // themselves): let clicking / Entering a focused button do its own thing.
+    if (target.closest && target.closest('button, [role="button"]')) return;
 
-    // Only intercept double-clicks on an actual file item.
+    // Only act on a gesture over an actual file item.
     if (!isFileItem(target)) return;
 
-    const root = event.currentTarget instanceof Document
-      ? event.currentTarget
-      : document;
+    // Only engage inside a recognised picker footer.
+    const footer = findFooter(document);
+    if (!footer || !footer.linkBtn) return;
 
-    const attachBtn = currentAttachButton(root);
-    if (!attachBtn || isDisabled(attachBtn)) {
-      // No attachment option (e.g. native Google Docs can only be linked):
-      // let Gmail's default behaviour proceed.
-      return;
+    const attachBtn = footer.attachBtn;
+
+    if (attachBtn && !isDisabled(attachBtn)) {
+      // Insert the just-selected file as an attachment instead of a link.
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      synthesizing = true;
+      try {
+        attachBtn.click();
+      } finally {
+        // Release on the next tick so any follow-on events from .click() that
+        // Google might dispatch are still recognised as ours.
+        setTimeout(() => {
+          synthesizing = false;
+        }, 0);
+      }
+    } else {
+      // Fallback: attachment is unavailable/disabled (e.g. a native Google
+      // Doc). Suppress the default action so a link is not inserted by
+      // accident. Double-click and Enter simply do nothing here.
+      event.preventDefault();
+      event.stopImmediatePropagation();
     }
+  }
 
-    // Stop Gmail's built-in "insert as link on double-click" from firing...
-    event.preventDefault();
-    event.stopImmediatePropagation();
+  function onDblClick(event) {
+    handleDefaultAction(event);
+  }
 
-    // ...and insert the just-selected file as an attachment instead.
-    synthesizing = true;
-    try {
-      attachBtn.click();
-    } finally {
-      // Release on the next tick so any follow-on events from .click() that
-      // Google might dispatch are still recognised as ours.
-      setTimeout(() => {
-        synthesizing = false;
-      }, 0);
-    }
+  function onKeyDown(event) {
+    if (event.key !== "Enter") return;
+    // Leave modified Enter (Ctrl/Cmd/Alt/Shift+Enter) to the app.
+    if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+    handleDefaultAction(event);
   }
 
   /* ----------------------------- wiring ------------------------------- */
@@ -291,9 +301,10 @@
   }
 
   function start() {
-    // Capture-phase double-click listener so we run before Gmail's own
-    // handler and can suppress it.
+    // Capture-phase listeners so we run before Gmail's own handlers and can
+    // suppress them (double-click and Enter both "confirm" the selected file).
     document.addEventListener("dblclick", onDblClick, true);
+    document.addEventListener("keydown", onKeyDown, true);
 
     // Watch for the picker footer appearing / re-rendering.
     const observer = new MutationObserver(scheduleScan);

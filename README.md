@@ -11,12 +11,16 @@ It does two things when the Drive picker's footer appears:
    default‑styled slot (and the correct Material styling), and the *link*
    button becomes the secondary option. The link option stays fully
    functional for the exceptions where you really do want to share a link.
-2. **Overrides double‑click** — double‑clicking a file in the picker inserts
-   it as an **attachment** rather than a link.
+2. **Overrides the confirm gesture** — double‑clicking a file, or selecting it
+   and pressing **Enter**, inserts it as an **attachment** rather than a link.
 
 If a selected file can only be linked (e.g. a native Google Doc/Sheet, which
-Gmail can't attach as a file), the extension notices there is no attachment
-button and quietly does nothing, so the picker keeps working normally.
+Gmail can't attach as a file), the extension keeps both buttons but leaves the
+**attachment button disabled in the primary slot**, so the link button is
+demoted to the secondary position and can't be clicked by accident. In that
+fallback, double‑click and Enter do **nothing** (they never insert a link
+behind your back) — you insert a link only by clicking "Insert as Drive link"
+on purpose.
 
 ## Install (unpacked)
 
@@ -36,7 +40,7 @@ Open the extension's **Options** (via `chrome://extensions` → *Details* →
 *Extension options*, or the puzzle‑piece menu). You can:
 
 - Turn the **button swap** on/off.
-- Turn the **double‑click → attachment** override on/off.
+- Turn the **double‑click / Enter → attachment** override on/off.
 - Adjust the **label‑matching patterns** if your Gmail is not in English
   (see below).
 
@@ -101,13 +105,18 @@ icons/                 Extension icons (generated, see scripts/)
 ## Limitations / notes
 
 - The extension deliberately touches only the two footer buttons and the
-  double‑click behaviour; it makes no network requests and stores nothing
-  beyond your two on/off preferences.
+  confirm‑gesture (double‑click / Enter) behaviour; it makes no network
+  requests and stores nothing beyond your preferences.
 - If Google significantly restructures the picker, the swap may stop
   applying. Because it matches on visible text, the usual fix is just
   updating the label patterns in the options rather than the code.
-- The double‑click override triggers the *attachment* button for the file you
-  double‑clicked. If you have a mix selected, use the buttons directly.
+- The confirm‑gesture override triggers the *attachment* button for the file
+  you double‑clicked / pressed Enter on. If you have a mix selected, use the
+  buttons directly.
+- The disabled‑attachment fallback assumes Gmail renders both buttons and
+  disables the attachment one for native Google files. If your Gmail instead
+  omits the attachment button entirely for those files, the link button simply
+  stays in place (still demoted from being the double‑click/Enter default).
 
 ## Development
 

@@ -21,9 +21,11 @@
     // "Insert as attachment" takes the primary/default slot.
     swapButtons: true,
 
-    // When a file is double-clicked in the picker, insert it as an
-    // attachment instead of the built-in default (a Drive link).
-    overrideDoubleClick: true,
+    // When a file is confirmed in the picker (double-click or Enter), insert
+    // it as an attachment instead of the built-in default (a Drive link).
+    // In the fallback case (attachment unavailable, e.g. a native Google Doc)
+    // the gesture is suppressed so a link is never inserted by accident.
+    overrideDefaultAction: true,
 
     // Regular expressions (as strings) used to recognise the two buttons by
     // their visible text / aria-label. Localisable: override these on the
